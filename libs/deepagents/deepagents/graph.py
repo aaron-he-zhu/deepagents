@@ -18,6 +18,7 @@ from langgraph.store.base import BaseStore
 from langgraph.types import Checkpointer
 
 from deepagents.backends.protocol import BackendFactory, BackendProtocol
+from deepagents.middleware.dynamic_model import DynamicModelMiddleware
 from deepagents.middleware.filesystem import FilesystemMiddleware
 from deepagents.middleware.patch_tool_calls import PatchToolCallsMiddleware
 from deepagents.middleware.subagents import CompiledSubAgent, SubAgent, SubAgentMiddleware
@@ -111,6 +112,7 @@ def create_deep_agent(
         keep = ("messages", 6)
 
     deepagent_middleware = [
+        DynamicModelMiddleware(default_model=model),  # Log runtime model config
         TodoListMiddleware(),
         FilesystemMiddleware(backend=backend),
         SubAgentMiddleware(
