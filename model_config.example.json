@@ -1,0 +1,12 @@
+{
+  "provider": "openrouter",
+  "model": "anthropic/claude-sonnet-4",
+  "api_key": "YOUR_API_KEY_HERE",
+  "base_url": "https://openrouter.ai/api/v1",
+  "model_overrides": {
+    "suggestions": "anthropic/claude-haiku-4"
+  },
+  "tavily_api_key": "YOUR_TAVILY_API_KEY_HERE",
+  "perplexity_api_key": "YOUR_PERPLEXITY_API_KEY_HERE",
+  "_comment": "Copy this file to model_config.json and fill in your API keys. Edit via Settings UI."
+}

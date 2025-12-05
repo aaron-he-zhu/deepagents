@@ -66,26 +66,21 @@ def load_config_file() -> dict[str, Any] | None:
         
         provider = config.get("provider")
         
-        # Check credentials based on provider
+        # Check credentials based on provider (config file only, no env var fallback)
         if provider == "bedrock":
             # AWS Bedrock uses access key + secret key
-            aws_access_key = config.get("aws_access_key_id") or os.environ.get("AWS_ACCESS_KEY_ID")
-            aws_secret_key = config.get("aws_secret_access_key") or os.environ.get("AWS_SECRET_ACCESS_KEY")
-            if not aws_access_key or not aws_secret_key:
-                logger.warning("[MODEL CONFIG] AWS credentials not found for Bedrock")
+            if not config.get("aws_access_key_id") or not config.get("aws_secret_access_key"):
+                logger.warning("[MODEL CONFIG] AWS credentials not found in config file for Bedrock")
                 return None
         elif provider == "azure":
             # Azure uses endpoint + api key
-            azure_key = config.get("azure_api_key") or os.environ.get("AZURE_OPENAI_API_KEY")
-            azure_url = config.get("azure_base_url") or os.environ.get("AZURE_OPENAI_ENDPOINT")
-            if not azure_key or not azure_url:
-                logger.warning("[MODEL CONFIG] Azure credentials not found")
+            if not config.get("azure_api_key") or not config.get("azure_base_url"):
+                logger.warning("[MODEL CONFIG] Azure credentials not found in config file")
                 return None
         else:
             # Standard API key check for other providers
-            api_key = config.get("api_key") or os.environ.get("OPENAI_API_KEY")
-            if not api_key:
-                logger.warning("[MODEL CONFIG] No API key found in config or environment")
+            if not config.get("api_key"):
+                logger.warning("[MODEL CONFIG] No API key found in config file")
                 return None
         
         logger.info(f"[MODEL CONFIG] Loaded config from file: provider={provider}, model={config.get('model')}")

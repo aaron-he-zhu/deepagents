@@ -213,3 +213,6 @@ __marimo__/
 .claude
 
 .idea
+
+# Model configuration (contains API keys)
+model_config.json
