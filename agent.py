@@ -26,6 +26,14 @@ from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
+# Try to import AWS Bedrock support
+try:
+    from langchain_aws import ChatBedrock
+    HAS_BEDROCK = True
+except ImportError:
+    HAS_BEDROCK = False
+    ChatBedrock = None
+
 from deepagents import create_deep_agent
 from deepagents.middleware.subagents import DEFAULT_SUBAGENT_PROMPT
 
@@ -56,13 +64,31 @@ def load_config_file() -> dict[str, Any] | None:
             logger.warning("[MODEL CONFIG] Config file missing provider or model")
             return None
         
-        # Check if API key is set (either in file or env)
-        api_key = config.get("api_key") or os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            logger.warning("[MODEL CONFIG] No API key found in config or environment")
-            return None
+        provider = config.get("provider")
         
-        logger.info(f"[MODEL CONFIG] Loaded config from file: provider={config.get('provider')}, model={config.get('model')}")
+        # Check credentials based on provider
+        if provider == "bedrock":
+            # AWS Bedrock uses access key + secret key
+            aws_access_key = config.get("aws_access_key_id") or os.environ.get("AWS_ACCESS_KEY_ID")
+            aws_secret_key = config.get("aws_secret_access_key") or os.environ.get("AWS_SECRET_ACCESS_KEY")
+            if not aws_access_key or not aws_secret_key:
+                logger.warning("[MODEL CONFIG] AWS credentials not found for Bedrock")
+                return None
+        elif provider == "azure":
+            # Azure uses endpoint + api key
+            azure_key = config.get("azure_api_key") or os.environ.get("AZURE_OPENAI_API_KEY")
+            azure_url = config.get("azure_base_url") or os.environ.get("AZURE_OPENAI_ENDPOINT")
+            if not azure_key or not azure_url:
+                logger.warning("[MODEL CONFIG] Azure credentials not found")
+                return None
+        else:
+            # Standard API key check for other providers
+            api_key = config.get("api_key") or os.environ.get("OPENAI_API_KEY")
+            if not api_key:
+                logger.warning("[MODEL CONFIG] No API key found in config or environment")
+                return None
+        
+        logger.info(f"[MODEL CONFIG] Loaded config from file: provider={provider}, model={config.get('model')}")
         return config
         
     except json.JSONDecodeError as e:
@@ -105,52 +131,127 @@ def create_model_from_params(
     api_key: str | None = None,
     base_url: str | None = None,
     label: str = "",
+    # AWS Bedrock specific
+    aws_access_key_id: str | None = None,
+    aws_secret_access_key: str | None = None,
+    aws_region: str | None = None,
+    aws_account_id: str | None = None,
+    # Azure specific
+    azure_base_url: str | None = None,
+    azure_api_key: str | None = None,
 ) -> BaseChatModel | None:
     """Create a model instance from parameters.
     
     Args:
-        provider: Provider name (openai, anthropic, google, openrouter)
+        provider: Provider name (openai, anthropic, google, openrouter, bedrock, azure)
         model_name: Model name/ID
         api_key: API key (optional, falls back to env vars)
         base_url: Base URL for OpenAI-compatible APIs
         label: Label for logging (e.g., "Primary", "Subagent")
+        aws_access_key_id: AWS Access Key ID for Bedrock
+        aws_secret_access_key: AWS Secret Access Key for Bedrock
+        aws_region: AWS Region for Bedrock
+        aws_account_id: AWS Account ID for building Inference Profile ARN
+        azure_base_url: Azure OpenAI base URL
+        azure_api_key: Azure OpenAI API key
     
     Returns:
         Configured model instance, or None if creation fails.
+    
+    NOTE: All credentials must be provided via parameters (from model_config.json).
+    Environment variables are NOT used as fallback for security.
     """
     log_prefix = f"[MODEL CONFIG] [{label}]" if label else "[MODEL CONFIG]"
     
     try:
         if provider == "openai":
-            key = api_key or os.environ.get("OPENAI_API_KEY")
-            if key:
+            if api_key:
                 logger.info(f"{log_prefix} Creating OpenAI model: {model_name}")
-                return ChatOpenAI(model=model_name, openai_api_key=key)
+                return ChatOpenAI(model=model_name, openai_api_key=api_key)
+            else:
+                logger.warning(f"{log_prefix} OpenAI API key not configured in Settings")
         
         elif provider == "anthropic":
-            key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-            if key:
+            if api_key:
                 logger.info(f"{log_prefix} Creating Anthropic model: {model_name}")
-                return init_chat_model(f"anthropic:{model_name}", api_key=key)
+                return init_chat_model(f"anthropic:{model_name}", api_key=api_key)
+            else:
+                logger.warning(f"{log_prefix} Anthropic API key not configured in Settings")
         
         elif provider == "google":
-            key = api_key or os.environ.get("GOOGLE_API_KEY")
-            if key:
+            if api_key:
                 logger.info(f"{log_prefix} Creating Google model: {model_name}")
-                return init_chat_model(f"google_genai:{model_name}", api_key=key)
+                return init_chat_model(f"google_genai:{model_name}", api_key=api_key)
+            else:
+                logger.warning(f"{log_prefix} Google API key not configured in Settings")
         
         elif provider == "openrouter":
-            key = api_key or os.environ.get("OPENAI_API_KEY")
-            url = base_url or os.environ.get("OPENAI_BASE_URL")
-            if key and url:
-                logger.info(f"{log_prefix} Creating OpenAI-compatible model: {model_name} at {url}")
+            if api_key and base_url:
+                logger.info(f"{log_prefix} Creating OpenAI-compatible model: {model_name} at {base_url}")
                 return ChatOpenAI(
                     model=model_name,
-                    openai_api_base=url,
-                    openai_api_key=key,
+                    openai_api_base=base_url,
+                    openai_api_key=api_key,
                 )
+            else:
+                logger.warning(f"{log_prefix} OpenAI-compatible API not fully configured in Settings")
         
-        logger.warning(f"{log_prefix} Could not create model for provider={provider}")
+        elif provider == "bedrock":
+            if not HAS_BEDROCK:
+                logger.error(f"{log_prefix} langchain-aws not installed. Run: pip install langchain-aws")
+                return None
+            
+            if aws_access_key_id and aws_secret_access_key:
+                region = aws_region or "us-east-1"
+                
+                # Build Inference Profile ARN if account_id is provided and model_name is not already an ARN
+                actual_model_id = model_name
+                if aws_account_id and not model_name.startswith("arn:"):
+                    # Build ARN: arn:aws:bedrock:{region}:{account_id}:inference-profile/us.{model_name}
+                    actual_model_id = f"arn:aws:bedrock:{region}:{aws_account_id}:inference-profile/us.{model_name}"
+                    logger.info(f"{log_prefix} Built Inference Profile ARN: {actual_model_id}")
+                
+                logger.info(f"{log_prefix} Creating AWS Bedrock model: {actual_model_id} in {region}")
+                # Detect provider from model name/ARN for tool binding
+                bedrock_provider = None
+                if "anthropic" in model_name.lower():
+                    bedrock_provider = "anthropic"
+                elif "amazon" in model_name.lower():
+                    bedrock_provider = "amazon"
+                elif "meta" in model_name.lower():
+                    bedrock_provider = "meta"
+                elif "mistral" in model_name.lower():
+                    bedrock_provider = "mistral"
+                elif "cohere" in model_name.lower():
+                    bedrock_provider = "cohere"
+                
+                return ChatBedrock(
+                    model_id=actual_model_id,
+                    region_name=region,
+                    credentials_profile_name=None,
+                    model_kwargs={},
+                    aws_access_key_id=aws_access_key_id,
+                    aws_secret_access_key=aws_secret_access_key,
+                    provider=bedrock_provider,
+                )
+            else:
+                logger.warning(f"{log_prefix} AWS Bedrock credentials not configured in Settings")
+        
+        elif provider == "azure":
+            if azure_base_url and azure_api_key:
+                logger.info(f"{log_prefix} Creating Azure OpenAI model: {model_name} at {azure_base_url}")
+                # Azure uses deployment name as model
+                from langchain_openai import AzureChatOpenAI
+                return AzureChatOpenAI(
+                    deployment_name=model_name,
+                    azure_endpoint=azure_base_url,
+                    api_key=azure_api_key,
+                    api_version="2024-02-15-preview",
+                )
+            else:
+                logger.warning(f"{log_prefix} Azure OpenAI not fully configured in Settings")
+        
+        logger.warning(f"{log_prefix} Could not create model for provider={provider}. Please configure in Settings.")
         return None
         
     except Exception as e:
@@ -173,55 +274,48 @@ def get_model_from_config() -> BaseChatModel | None:
     api_key = config.get("api_key")
     base_url = config.get("base_url")
     
+    # AWS Bedrock specific
+    aws_access_key_id = config.get("aws_access_key_id")
+    aws_secret_access_key = config.get("aws_secret_access_key")
+    aws_region = config.get("aws_region")
+    aws_account_id = config.get("aws_account_id")
+    
+    # Azure specific
+    azure_base_url = config.get("azure_base_url")
+    azure_api_key = config.get("azure_api_key")
+    
     return create_model_from_params(
         provider=provider,
         model_name=model_name,
         api_key=api_key,
         base_url=base_url,
         label="Primary",
+        aws_access_key_id=aws_access_key_id,
+        aws_secret_access_key=aws_secret_access_key,
+        aws_region=aws_region,
+        aws_account_id=aws_account_id,
+        azure_base_url=azure_base_url,
+        azure_api_key=azure_api_key,
     )
 
 
 def get_model_from_env() -> BaseChatModel | None:
-    """Get model from environment variables.
+    """Get model from environment variables (deprecated, only for debugging).
+    
+    NOTE: All API keys should be configured via the Settings UI.
+    Environment variables are only used as a last resort for debugging.
     
     Returns:
-        Configured model if environment variables are set, None otherwise.
+        Configured model if MODEL_NAME env var is set, None otherwise.
     """
-    # Check for explicit model name
+    # Only support MODEL_NAME for debugging (no API keys from env)
     model_name = os.environ.get("MODEL_NAME")
     if model_name:
-        logger.info(f"[MODEL CONFIG] Using MODEL_NAME from env: {model_name}")
+        logger.info(f"[MODEL CONFIG] Using MODEL_NAME from env (debug): {model_name}")
         return init_chat_model(model_name)
     
-    # Check for OpenAI-compatible API
-    if os.environ.get("OPENAI_API_KEY"):
-        openai_model = os.environ.get("OPENAI_MODEL", "gpt-4o")
-        base_url = os.environ.get("OPENAI_BASE_URL")
-        api_key = os.environ.get("OPENAI_API_KEY")
-        
-        logger.info(f"[MODEL CONFIG] Using OpenAI from env: model={openai_model}, base_url={base_url}")
-        
-        if base_url:
-            return ChatOpenAI(
-                model=openai_model,
-                openai_api_base=base_url,
-                openai_api_key=api_key,
-            )
-        return init_chat_model(f"openai:{openai_model}")
-    
-    # Check for Anthropic
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        anthropic_model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
-        logger.info(f"[MODEL CONFIG] Using Anthropic from env: {anthropic_model}")
-        return init_chat_model(f"anthropic:{anthropic_model}")
-    
-    # Check for Google
-    if os.environ.get("GOOGLE_API_KEY"):
-        google_model = os.environ.get("GOOGLE_MODEL", "gemini-2.0-flash")
-        logger.info(f"[MODEL CONFIG] Using Google from env: {google_model}")
-        return init_chat_model(f"google_genai:{google_model}")
-    
+    # All API keys should come from Settings UI (model_config.json)
+    # Do not read API keys from environment variables
     return None
 
 
@@ -279,10 +373,20 @@ def get_subagent_model(subagent_name: str, primary_model: BaseChatModel) -> Base
     # Create custom model for subagent
     logger.info(f"[MODEL CONFIG] [Subagent:{subagent_name}] Using override: {override_model}")
     
-    # Use same provider/api_key/base_url as primary, but different model
+    # Use same provider/credentials as primary, but different model
     provider = config.get("provider")
     api_key = config.get("api_key")
     base_url = config.get("base_url")
+    
+    # AWS Bedrock specific
+    aws_access_key_id = config.get("aws_access_key_id")
+    aws_secret_access_key = config.get("aws_secret_access_key")
+    aws_region = config.get("aws_region")
+    aws_account_id = config.get("aws_account_id")
+    
+    # Azure specific
+    azure_base_url = config.get("azure_base_url")
+    azure_api_key = config.get("azure_api_key")
     
     subagent_model = create_model_from_params(
         provider=provider,
@@ -290,6 +394,12 @@ def get_subagent_model(subagent_name: str, primary_model: BaseChatModel) -> Base
         api_key=api_key,
         base_url=base_url,
         label=f"Subagent:{subagent_name}",
+        aws_access_key_id=aws_access_key_id,
+        aws_secret_access_key=aws_secret_access_key,
+        aws_region=aws_region,
+        aws_account_id=aws_account_id,
+        azure_base_url=azure_base_url,
+        azure_api_key=azure_api_key,
     )
     
     return subagent_model if subagent_model else primary_model
