@@ -439,6 +439,1681 @@ def build_custom_subagents(primary_model: BaseChatModel) -> list[dict[str, Any]]
 
 
 # ============================================================
+# SerpAPI Google Search Tools
+# ============================================================
+
+def get_serp_tools() -> list:
+    """Get SerpAPI tools if API key is configured.
+    
+    Returns:
+        List of tools if SerpAPI is configured, empty list otherwise.
+        
+    Available tools:
+        - serp_search: Unified search via engine parameter (google, google_news, google_images, google_maps, etc.)
+    """
+    config = load_config_file()
+    serp_api_key = config.get("serp_api_key") if config else None
+    
+    if not serp_api_key:
+        serp_api_key = os.environ.get("SERP_API_KEY") or os.environ.get("SERPAPI_API_KEY")
+    
+    if not serp_api_key:
+        logger.info("[SERPAPI] No SerpAPI key configured, Google search disabled")
+        return []
+    
+    try:
+        import requests
+        
+        BASE_URL = "https://serpapi.com/search"
+        
+        def _serp_request(params: dict) -> dict:
+            """Helper function to make SerpAPI requests."""
+            try:
+                params["api_key"] = serp_api_key
+                response = requests.get(BASE_URL, params=params, timeout=60)
+                response.raise_for_status()
+                return response.json()
+            except requests.exceptions.RequestException as e:
+                return {"error": str(e)}
+        
+        # ============================================================
+        # Unified Search Tool
+        # ============================================================
+        def serp_search(
+            query: str,
+            engine: str = "google",
+            num_results: int = 10,
+            location: str = None,
+            lang: str = "en"
+        ) -> dict:
+            """Search using SerpAPI with different engines.
+            
+            Args:
+                query: Search query string
+                engine: Search engine to use. Options:
+                    - "google": Web search (default)
+                    - "google_news": News articles
+                    - "google_images": Image search
+                    - "google_maps": Local businesses/places
+                    - "google_scholar": Academic papers
+                    - "google_shopping": Shopping results
+                    - "youtube": YouTube videos
+                    - "bing": Bing web search
+                    - "baidu": Baidu search
+                num_results: Number of results to return (default 10)
+                location: Location for localized results (optional)
+                lang: Language code (default "en")
+            
+            Returns:
+                Dictionary containing search results
+            """
+            params = {
+                "engine": engine,
+                "q": query,
+                "num": num_results,
+                "hl": lang
+            }
+            if location:
+                params["location"] = location
+            return _serp_request(params)
+        
+        # Filter tools based on enabled_tools config
+        enabled = get_enabled_tools()
+        tools = []
+        tool_names = []
+        
+        if enabled.get("serp_search", True):
+            tools.append(serp_search)
+            tool_names.append("serp_search")
+        
+        logger.info(f"[SERPAPI] Loaded {len(tools)} SerpAPI tools: {', '.join(tool_names)}")
+        return tools
+        
+    except Exception as e:
+        logger.error(f"[SERPAPI] Failed to initialize SerpAPI tools: {e}")
+        return []
+
+
+# ============================================================
+# Exa Neural Search Tools
+# ============================================================
+
+def get_exa_tools() -> list:
+    """Get Exa API tools if API key is configured.
+    
+    Returns:
+        List of tools if Exa is configured, empty list otherwise.
+        
+    Available tools:
+        - exa_search: Neural/keyword search for web pages
+        - exa_contents: Get clean content from URLs
+        - exa_find_similar: Find semantically similar pages
+        - exa_answer: Get direct answers with citations
+        - exa_research: Automate in-depth web research with citations
+    """
+    config = load_config_file()
+    exa_api_key = config.get("exa_api_key") if config else None
+    
+    if not exa_api_key:
+        exa_api_key = os.environ.get("EXA_API_KEY")
+    
+    if not exa_api_key:
+        logger.info("[EXA] No Exa API key configured, neural search disabled")
+        return []
+    
+    try:
+        import requests
+        
+        BASE_URL = "https://api.exa.ai"
+        headers = {
+            "x-api-key": exa_api_key,
+            "Content-Type": "application/json"
+        }
+        
+        def _exa_request(endpoint: str, payload: dict) -> dict:
+            """Helper function to make Exa API requests."""
+            try:
+                response = requests.post(
+                    f"{BASE_URL}/{endpoint}",
+                    headers=headers,
+                    json=payload,
+                    timeout=60
+                )
+                response.raise_for_status()
+                return response.json()
+            except requests.exceptions.RequestException as e:
+                return {"error": str(e)}
+        
+        # ============================================================
+        # Tool 1: Exa Search
+        # ============================================================
+        def exa_search(
+            query: str,
+            num_results: int = 10,
+            search_type: str = "auto",
+            use_autoprompt: bool = True,
+            include_text: bool = True,
+            include_highlights: bool = True
+        ) -> dict:
+            """Search the web using Exa's neural/keyword search.
+            
+            Args:
+                query: Search query string
+                num_results: Number of results to return (default 10)
+                search_type: "neural", "keyword", or "auto" (default "auto")
+                use_autoprompt: Automatically optimize query (default True)
+                include_text: Include page text content (default True)
+                include_highlights: Include highlighted snippets (default True)
+            
+            Returns:
+                Dictionary containing search results with titles, URLs, and content
+            """
+            payload = {
+                "query": query,
+                "numResults": num_results,
+                "type": search_type,
+                "useAutoprompt": use_autoprompt,
+                "contents": {
+                    "text": include_text,
+                    "highlights": include_highlights
+                }
+            }
+            return _exa_request("search", payload)
+        
+        # ============================================================
+        # Tool 2: Exa Contents
+        # ============================================================
+        def exa_contents(
+            urls: list,
+            include_text: bool = True,
+            include_highlights: bool = False,
+            highlight_query: str = None
+        ) -> dict:
+            """Get clean, parsed content from URLs.
+            
+            Args:
+                urls: List of URLs to get content from
+                include_text: Include main text content (default True)
+                include_highlights: Include highlighted snippets (default False)
+                highlight_query: Query for generating highlights (optional)
+            
+            Returns:
+                Dictionary containing parsed content from each URL
+            """
+            payload = {
+                "ids": urls,
+                "text": include_text,
+                "highlights": include_highlights
+            }
+            if highlight_query:
+                payload["highlightQuery"] = highlight_query
+            return _exa_request("contents", payload)
+        
+        # ============================================================
+        # Tool 3: Exa Find Similar
+        # ============================================================
+        def exa_find_similar(
+            url: str,
+            num_results: int = 10,
+            include_text: bool = True,
+            exclude_source_domain: bool = True
+        ) -> dict:
+            """Find web pages semantically similar to a given URL.
+            
+            Args:
+                url: URL to find similar pages for
+                num_results: Number of similar pages to return (default 10)
+                include_text: Include page text content (default True)
+                exclude_source_domain: Exclude pages from the same domain (default True)
+            
+            Returns:
+                Dictionary containing similar pages with titles, URLs, and content
+            """
+            payload = {
+                "url": url,
+                "numResults": num_results,
+                "excludeSourceDomain": exclude_source_domain,
+                "contents": {
+                    "text": include_text
+                }
+            }
+            return _exa_request("findSimilar", payload)
+        
+        # ============================================================
+        # Tool 4: Exa Answer
+        # ============================================================
+        def exa_answer(
+            query: str,
+            text: bool = True
+        ) -> dict:
+            """Get direct answers to questions with citations.
+            
+            Args:
+                query: Question to answer
+                text: Include source text (default True)
+            
+            Returns:
+                Dictionary containing answer with citations
+            """
+            payload = {
+                "query": query,
+                "text": text
+            }
+            return _exa_request("answer", payload)
+        
+        # ============================================================
+        # Tool 5: Exa Research
+        # ============================================================
+        def exa_research(
+            query: str,
+            model: str = "exa-research"
+        ) -> dict:
+            """Automate in-depth web research and receive structured JSON results with citations.
+            
+            Args:
+                query: Research topic or question
+                model: Model to use - "exa-research" (standard) or "exa-research-pro" (advanced)
+            
+            Returns:
+                Dictionary containing structured research results with citations
+            """
+            # Research endpoint uses OpenAI-compatible chat completions format
+            try:
+                response = requests.post(
+                    f"{BASE_URL}/chat/completions",
+                    headers=headers,
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "user", "content": query}
+                        ]
+                    },
+                    timeout=120  # Research takes longer
+                )
+                response.raise_for_status()
+                return response.json()
+            except requests.exceptions.RequestException as e:
+                return {"error": str(e)}
+        
+        # Filter tools based on enabled_tools config
+        enabled = get_enabled_tools()
+        tools = []
+        tool_names = []
+        
+        if enabled.get("exa_search", True):
+            tools.append(exa_search)
+            tool_names.append("exa_search")
+        if enabled.get("exa_contents", True):
+            tools.append(exa_contents)
+            tool_names.append("exa_contents")
+        if enabled.get("exa_find_similar", True):
+            tools.append(exa_find_similar)
+            tool_names.append("exa_find_similar")
+        if enabled.get("exa_answer", True):
+            tools.append(exa_answer)
+            tool_names.append("exa_answer")
+        if enabled.get("exa_research", True):
+            tools.append(exa_research)
+            tool_names.append("exa_research")
+        
+        logger.info(f"[EXA] Loaded {len(tools)} Exa tools: {', '.join(tool_names)}")
+        return tools
+        
+    except Exception as e:
+        logger.error(f"[EXA] Failed to initialize Exa tools: {e}")
+        return []
+
+
+# ============================================================
+# Web Search Tools (Tavily)
+# ============================================================
+
+def get_tavily_tools() -> list:
+    """Get Tavily API tools if API key is configured.
+    
+    Returns:
+        List of tools if Tavily is configured, empty list otherwise.
+        
+    Available tools (matching Tavily API endpoints):
+        - tavily_search: /search - Search the web for information
+        - tavily_extract: /extract - Extract content from URLs
+        - tavily_map: /map - Discover website structure and internal links
+        - tavily_crawl: /crawl - Crawl and extract content from entire website
+    """
+    config = load_config_file()
+    tavily_api_key = config.get("tavily_api_key") if config else None
+    
+    if not tavily_api_key:
+        # Also check environment variable
+        tavily_api_key = os.environ.get("TAVILY_API_KEY")
+    
+    if not tavily_api_key:
+        logger.info("[TAVILY] No Tavily API key configured, web search disabled")
+        return []
+    
+    # Set environment variable for any libraries that need it
+    os.environ["TAVILY_API_KEY"] = tavily_api_key
+    
+    try:
+        from tavily import TavilyClient
+        import requests
+        from markdownify import markdownify
+        
+        tavily_client = TavilyClient(api_key=tavily_api_key)
+        
+        # ============================================================
+        # Tool 1: Tavily Search (/search endpoint)
+        # ============================================================
+        def tavily_search(
+            query: str,
+            max_results: int = 5,
+        ) -> dict:
+            """Search the web using Tavily /search endpoint.
+            
+            Args:
+                query: Search query string
+                max_results: Maximum number of results to return (default 5)
+            
+            Returns:
+                Dictionary containing search results with titles, URLs, and content snippets
+            """
+            try:
+                response = tavily_client.search(
+                    query=query,
+                    max_results=max_results,
+                    include_raw_content=False,
+                )
+                
+                results = []
+                for result in response.get("results", []):
+                    results.append({
+                        "title": result.get("title", ""),
+                        "url": result.get("url", ""),
+                        "content": result.get("content", ""),
+                    })
+                
+                return {
+                    "success": True,
+                    "query": query,
+                    "results": results,
+                    "answer": response.get("answer", ""),
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "query": query,
+                    "error": str(e),
+                    "results": [],
+                }
+        
+        # ============================================================
+        # Tool 2: Tavily Extract (/extract endpoint)
+        # ============================================================
+        def tavily_extract(
+            urls: list[str],
+            include_images: bool = False,
+        ) -> dict:
+            """Extract content from URLs using Tavily /extract endpoint.
+            
+            Handles JavaScript-rendered pages and complex layouts.
+            Can extract from single URL or multiple URLs (max 20).
+            
+            Args:
+                urls: List of URLs to extract content from (max 20)
+                include_images: Whether to include extracted images (default False)
+            
+            Returns:
+                Dictionary containing extracted content from each URL
+            """
+            try:
+                # Limit to 20 URLs as per Tavily API
+                urls = urls[:20]
+                
+                response = tavily_client.extract(
+                    urls=urls,
+                    include_images=include_images,
+                )
+                
+                results = []
+                for result in response.get("results", []):
+                    results.append({
+                        "url": result.get("url", ""),
+                        "content": result.get("raw_content", "")[:30000],  # Limit content
+                        "images": result.get("images", []) if include_images else [],
+                    })
+                
+                return {
+                    "success": True,
+                    "urls_requested": len(urls),
+                    "urls_extracted": len(results),
+                    "results": results,
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": str(e),
+                    "results": [],
+                }
+        
+        # ============================================================
+        # Tool 3: Tavily Map (/map endpoint)
+        # ============================================================
+        def tavily_map(
+            url: str,
+            max_depth: int = 2,
+            limit: int = 50,
+        ) -> dict:
+            """Discover and map the structure of a website using Tavily /map endpoint.
+            
+            Use this to understand a website's structure before crawling.
+            Returns all internal links found starting from the base URL.
+            
+            Args:
+                url: The root URL to start mapping from
+                max_depth: How many levels deep to explore (default 2)
+                limit: Maximum number of URLs to return (default 50)
+            
+            Returns:
+                Dictionary containing list of discovered URLs
+            """
+            try:
+                response = tavily_client.map(
+                    url=url,
+                    max_depth=max_depth,
+                    limit=limit,
+                )
+                
+                discovered_urls = response.get("results", [])
+                
+                return {
+                    "success": True,
+                    "base_url": url,
+                    "max_depth": max_depth,
+                    "urls_found": len(discovered_urls),
+                    "urls": discovered_urls,
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "base_url": url,
+                    "error": str(e),
+                    "urls": [],
+                }
+        
+        # ============================================================
+        # Tool 4: Tavily Crawl (/crawl endpoint)
+        # ============================================================
+        def tavily_crawl(
+            url: str,
+            max_depth: int = 2,
+            limit: int = 20,
+            instructions: str = "",
+        ) -> dict:
+            """Crawl a website and extract content using Tavily /crawl endpoint.
+            
+            Automatically follows internal links and extracts content.
+            Use this for building knowledge bases or comprehensive research.
+            
+            Args:
+                url: The starting URL to begin crawling
+                max_depth: How many levels deep to crawl (default 2)
+                limit: Maximum number of pages to crawl (default 20)
+                instructions: Optional instructions to filter pages (e.g., "Find all product pages")
+            
+            Returns:
+                Dictionary containing crawled pages with their content
+            """
+            try:
+                crawl_params = {
+                    "url": url,
+                    "max_depth": max_depth,
+                    "limit": limit,
+                }
+                if instructions:
+                    crawl_params["instructions"] = instructions
+                
+                response = tavily_client.crawl(**crawl_params)
+                
+                results = []
+                for result in response.get("results", []):
+                    results.append({
+                        "url": result.get("url", ""),
+                        "title": result.get("title", ""),
+                        "content": result.get("raw_content", "")[:20000],  # Limit per page
+                    })
+                
+                return {
+                    "success": True,
+                    "start_url": url,
+                    "pages_crawled": len(results),
+                    "max_depth": max_depth,
+                    "instructions": instructions or "None",
+                    "results": results,
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "start_url": url,
+                    "error": str(e),
+                    "results": [],
+                }
+        
+        # Filter tools based on enabled_tools config
+        enabled = get_enabled_tools()
+        tools = []
+        tool_names = []
+        
+        if enabled.get("tavily_search", True):
+            tools.append(tavily_search)
+            tool_names.append("tavily_search")
+        if enabled.get("tavily_extract", True):
+            tools.append(tavily_extract)
+            tool_names.append("tavily_extract")
+        if enabled.get("tavily_map", True):
+            tools.append(tavily_map)
+            tool_names.append("tavily_map")
+        if enabled.get("tavily_crawl", True):
+            tools.append(tavily_crawl)
+            tool_names.append("tavily_crawl")
+        
+        if tools:
+            logger.info(f"[TAVILY] Tools enabled: {', '.join(tool_names)}")
+        else:
+            logger.info("[TAVILY] All Tavily tools disabled by config")
+        
+        return tools
+        
+    except ImportError as e:
+        logger.warning(f"[TAVILY] Required packages not installed: {e}")
+        logger.warning("[TAVILY] Run: pip install tavily-python markdownify requests")
+        return []
+    except Exception as e:
+        logger.error(f"[TAVILY] Error initializing tools: {e}")
+        return []
+
+
+# ============================================================
+# Perplexity Sonar Tools
+# ============================================================
+
+def get_perplexity_tools() -> list:
+    """Get Perplexity API tools if API key is configured.
+    
+    Perplexity provides two main endpoints:
+    - /search: Returns raw search results (URLs, metadata)
+    - /chat/completions: AI-generated answers with citations (via model parameter)
+    
+    Returns:
+        List of tools if Perplexity is configured, empty list otherwise.
+        
+    Available tools:
+        - perplexity_search: Raw search results via /search endpoint
+        - perplexity_chat: AI answers via /chat/completions endpoint
+    """
+    config = load_config_file()
+    perplexity_api_key = config.get("perplexity_api_key") if config else None
+    
+    if not perplexity_api_key:
+        perplexity_api_key = os.environ.get("PERPLEXITY_API_KEY")
+    
+    if not perplexity_api_key:
+        logger.info("[PERPLEXITY] No Perplexity API key configured")
+        return []
+    
+    try:
+        import requests
+        
+        BASE_URL = "https://api.perplexity.ai"
+        headers = {
+            "Authorization": f"Bearer {perplexity_api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # ============================================================
+        # Tool 1: Perplexity Search (/search endpoint)
+        # ============================================================
+        def perplexity_search(
+            query: str,
+            num_results: int = 10
+        ) -> dict:
+            """Search the web using Perplexity's /search endpoint.
+            
+            Returns raw search results with URLs and metadata, without AI summarization.
+            Use this when you need source URLs for further processing.
+            
+            Args:
+                query: Search query string
+                num_results: Number of results to return (default 10)
+            
+            Returns:
+                Dictionary containing search results with URLs and metadata
+            """
+            try:
+                response = requests.post(
+                    f"{BASE_URL}/search",
+                    headers=headers,
+                    json={
+                        "query": query,
+                        "num_results": num_results
+                    },
+                    timeout=60
+                )
+                response.raise_for_status()
+                return response.json()
+            except requests.exceptions.RequestException as e:
+                return {"error": str(e)}
+        
+        # ============================================================
+        # Tool 2: Perplexity Chat (/chat/completions endpoint)
+        # ============================================================
+        def perplexity_chat(
+            query: str,
+            model: str = "sonar",
+            search_mode: str = "web",
+            recency_filter: str = None,
+            domains: list[str] | None = None,
+            return_images: bool = False,
+            return_related_questions: bool = False
+        ) -> dict:
+            """Get AI-generated answers using Perplexity's /chat/completions endpoint.
+            
+            Returns synthesized answers with citations based on web search.
+            
+            Args:
+                query: The question or search query
+                model: Model to use. Options:
+                    - "sonar": Lightweight search (default)
+                    - "sonar-pro": Advanced search
+                    - "sonar-deep-research": Exhaustive research
+                    - "sonar-reasoning": Fast reasoning
+                    - "sonar-reasoning-pro": Premier reasoning
+                search_mode: Search mode - "web" (default), "academic", or "sec"
+                recency_filter: Time filter - "day", "week", "month", or "year"
+                domains: Domain filter list (max 20, prefix with - to exclude)
+                return_images: Include images in response
+                return_related_questions: Include related questions
+            
+            Returns:
+                Dictionary containing AI answer with citations
+            """
+            try:
+                payload = {
+                    "model": model,
+                    "messages": [{"role": "user", "content": query}],
+                    "search_mode": search_mode,
+                    "temperature": 0.2,
+                    "return_images": return_images,
+                    "return_related_questions": return_related_questions
+                }
+                
+                if recency_filter and recency_filter in ["day", "week", "month", "year"]:
+                    payload["search_recency_filter"] = recency_filter
+                
+                if domains and len(domains) > 0:
+                    payload["search_domain_filter"] = domains[:20]
+                
+                response = requests.post(
+                    f"{BASE_URL}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=120
+                )
+                response.raise_for_status()
+                result = response.json()
+                
+                # Extract answer
+                answer = ""
+                if "choices" in result and len(result["choices"]) > 0:
+                    answer = result["choices"][0].get("message", {}).get("content", "")
+                
+                return {
+                    "success": True,
+                    "query": query,
+                    "answer": answer,
+                    "model": model,
+                    "search_results": result.get("search_results", []),
+                    "usage": result.get("usage", {}),
+                    "raw_response": result
+                }
+            except requests.exceptions.RequestException as e:
+                return {
+                    "success": False,
+                    "query": query,
+                    "error": str(e),
+                    "answer": ""
+                }
+        
+        # Filter tools based on enabled_tools config
+        enabled = get_enabled_tools()
+        tools = []
+        tool_names = []
+        
+        if enabled.get("perplexity_search", True):
+            tools.append(perplexity_search)
+            tool_names.append("perplexity_search")
+        if enabled.get("perplexity_chat", True):
+            tools.append(perplexity_chat)
+            tool_names.append("perplexity_chat")
+        
+        if tools:
+            logger.info(f"[PERPLEXITY] Tools enabled: {', '.join(tool_names)}")
+        else:
+            logger.info("[PERPLEXITY] All Perplexity tools disabled by config")
+        
+        return tools
+        
+    except Exception as e:
+        logger.error(f"[PERPLEXITY] Error initializing tools: {e}")
+        return []
+
+
+# ============================================================
+# Tool Enable/Disable Configuration
+# ============================================================
+
+def get_enabled_tools() -> dict:
+    """Get enabled tools configuration from model_config.json.
+    
+    Returns:
+        Dictionary with tool names as keys and boolean enabled status.
+        Default: all tools enabled.
+    """
+    default_config = {
+        "fetch_url": True,
+        # SerpAPI tools
+        "serp_search": True,
+        # Exa tools
+        "exa_search": True,
+        "exa_contents": True,
+        "exa_find_similar": True,
+        "exa_answer": True,
+        "exa_research": True,
+        # Tavily tools
+        "tavily_search": True,
+        "tavily_extract": True,
+        "tavily_map": True,
+        "tavily_crawl": True,
+        # Perplexity tools
+        "perplexity_search": True,
+        "perplexity_chat": True,
+        # Semrush tools
+        "semrush_report": True,
+        # Ahrefs tools - 15 tools
+        "ahrefs_domain_rating": True,
+        "ahrefs_url_rating": True,
+        "ahrefs_backlinks": True,
+        "ahrefs_referring_domains": True,
+        "ahrefs_anchors": True,
+        "ahrefs_organic_keywords": True,
+        "ahrefs_organic_competitors": True,
+        "ahrefs_keyword_metrics": True,
+        "ahrefs_matching_terms": True,
+        "ahrefs_related_terms": True,
+        "ahrefs_serp_overview": True,
+        "ahrefs_top_pages": True,
+        "ahrefs_health_score": True,
+        "ahrefs_brand_ai_responses": True,
+        "ahrefs_brand_impressions": True,
+        # Similarweb tools - 10 tools
+        "similarweb_visits": True,
+        "similarweb_traffic_sources": True,
+        "similarweb_search_traffic": True,
+        "similarweb_referral_traffic": True,
+        "similarweb_keywords": True,
+        "similarweb_similar_sites": True,
+        "similarweb_global_rank": True,
+        "similarweb_category_rank": True,
+        "similarweb_audience_interests": True,
+        "similarweb_geography": True,
+    }
+    
+    try:
+        if CONFIG_FILE.exists():
+            with open(CONFIG_FILE) as f:
+                config = json.load(f)
+                enabled_tools = config.get("enabled_tools", {})
+                # Merge with defaults (missing keys default to True)
+                for key in default_config:
+                    if key not in enabled_tools:
+                        enabled_tools[key] = default_config[key]
+                return enabled_tools
+    except Exception as e:
+        logger.warning(f"[TOOLS] Error reading enabled_tools config: {e}")
+    
+    return default_config
+
+
+# ============================================================
+# Built-in Tools (no API key required)
+# ============================================================
+
+def get_builtin_tools() -> list:
+    """Get built-in tools that don't require any API key.
+    
+    Returns:
+        List of built-in tools (filtered by enabled_tools config).
+        
+    Available tools:
+        - fetch_url: Fetch URL content and convert to markdown
+    """
+    enabled = get_enabled_tools()
+    tools = []
+    
+    # Only add fetch_url if enabled
+    if not enabled.get("fetch_url", True):
+        logger.info("[BUILTIN] fetch_url disabled by config")
+        return tools
+    
+    try:
+        import requests
+        from markdownify import markdownify
+        
+        def fetch_url(url: str, timeout: int = 30) -> dict:
+            """Fetch content from a URL and convert HTML to markdown.
+            
+            Use this to read web page content. The HTML is automatically
+            converted to clean markdown for easy processing.
+            
+            Args:
+                url: The URL to fetch (must be HTTP/HTTPS)
+                timeout: Request timeout in seconds (default 30)
+            
+            Returns:
+                Dictionary containing the page content as markdown
+            """
+            try:
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (compatible; DeepAgents/1.0)"
+                }
+                response = requests.get(url, headers=headers, timeout=timeout)
+                response.raise_for_status()
+                
+                content_type = response.headers.get("content-type", "")
+                if "text/html" in content_type:
+                    markdown_content = markdownify(response.text, heading_style="ATX")
+                else:
+                    markdown_content = response.text
+                
+                return {
+                    "success": True,
+                    "url": str(response.url),
+                    "content": markdown_content[:50000],  # Limit content length
+                    "content_type": content_type,
+                    "content_length": len(markdown_content),
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "url": url,
+                    "error": str(e),
+                }
+        
+        tools.append(fetch_url)
+        logger.info("[BUILTIN] Built-in tools enabled (fetch_url)")
+        return tools
+        
+    except ImportError as e:
+        logger.warning(f"[BUILTIN] Required packages not installed: {e}")
+        return []
+    except Exception as e:
+        logger.error(f"[BUILTIN] Error initializing tools: {e}")
+        return []
+
+
+# ============================================================
+# Semrush Tools
+# ============================================================
+
+def get_semrush_tools() -> list:
+    """Get Semrush SEO analytics tools if API key is configured.
+    
+    Returns:
+        List of tools if Semrush API key is configured, empty list otherwise.
+        
+    Available tools:
+        - semrush_report: Unified API endpoint with type parameter
+    """
+    config = load_config_file()
+    semrush_api_key = config.get("semrush_api_key") if config else None
+    
+    if not semrush_api_key:
+        semrush_api_key = os.environ.get("SEMRUSH_API_KEY")
+    
+    if not semrush_api_key:
+        logger.info("[SEMRUSH] No Semrush API key configured, tools disabled")
+        return []
+    
+    try:
+        import requests
+        
+        BASE_URL = "https://api.semrush.com"
+        
+        def _parse_csv(text: str) -> list[dict]:
+            """Parse Semrush CSV response into list of dicts."""
+            lines = text.strip().split("\n")
+            if len(lines) < 2:
+                return []
+            headers = lines[0].split(";")
+            results = []
+            for line in lines[1:]:
+                values = line.split(";")
+                results.append(dict(zip(headers, values)))
+            return results
+        
+        # ============================================================
+        # Unified Semrush Report Tool
+        # ============================================================
+        def semrush_report(
+            report_type: str,
+            target: str,
+            database: str = "us",
+            limit: int = 50
+        ) -> dict:
+            """Query Semrush API with different report types.
+            
+            Args:
+                report_type: Type of report. Options:
+                    - "domain_ranks": Domain overview metrics
+                    - "domain_organic": Domain organic keywords
+                    - "domain_organic_organic": Organic competitors
+                    - "phrase_all": Keyword overview
+                    - "phrase_related": Related keywords
+                    - "phrase_questions": Question keywords
+                    - "phrase_kdi": Keyword difficulty
+                    - "backlinks_overview": Backlinks summary
+                    - "backlinks": Backlinks list
+                    - "backlinks_refdomains": Referring domains
+                    - "backlinks_anchors": Anchor text analysis
+                target: Domain or keyword to analyze
+                database: Regional database - "us", "uk", "de", etc. (default "us")
+                limit: Max results (default 50, max 100)
+            
+            Returns:
+                Dictionary containing report results
+            """
+            try:
+                # Build params based on report type
+                params = {
+                    "type": report_type,
+                    "key": semrush_api_key,
+                    "database": database,
+                    "display_limit": min(limit, 100)
+                }
+                
+                # Domain-based reports
+                if report_type in ["domain_ranks", "domain_organic", "domain_organic_organic"]:
+                    params["domain"] = target
+                    if report_type == "domain_ranks":
+                        params["export_columns"] = "Dn,Rk,Or,Ot,Oc,Ad,At,Ac"
+                    elif report_type == "domain_organic":
+                        params["export_columns"] = "Ph,Po,Pp,Pd,Nq,Cp,Ur,Tr,Tc,Co,Nr,Td"
+                    elif report_type == "domain_organic_organic":
+                        params["export_columns"] = "Dn,Cr,Np,Or,Ot,Oc,Ad"
+                
+                # Keyword-based reports
+                elif report_type in ["phrase_all", "phrase_related", "phrase_questions", "phrase_kdi"]:
+                    params["phrase"] = target
+                    if report_type in ["phrase_all", "phrase_related"]:
+                        params["export_columns"] = "Ph,Nq,Cp,Co,Nr,Td"
+                    elif report_type == "phrase_questions":
+                        params["export_columns"] = "Ph,Nq,Cp,Co,Nr"
+                    elif report_type == "phrase_kdi":
+                        params["export_columns"] = "Ph,Kd"
+                
+                # Backlink-based reports
+                elif report_type in ["backlinks_overview", "backlinks", "backlinks_refdomains", "backlinks_anchors"]:
+                    params["target"] = target
+                    params["target_type"] = "root_domain"
+                
+                else:
+                    return {"success": False, "error": f"Unknown report type: {report_type}"}
+                
+                response = requests.get(BASE_URL, params=params, timeout=30)
+                response.raise_for_status()
+                data = _parse_csv(response.text)
+                
+                return {
+                    "success": True,
+                    "report_type": report_type,
+                    "target": target,
+                    "database": database,
+                    "results": data
+                }
+            except Exception as e:
+                return {"success": False, "report_type": report_type, "target": target, "error": str(e)}
+        
+        # Filter tools based on enabled_tools config
+        enabled = get_enabled_tools()
+        tools = []
+        tool_names = []
+        
+        if enabled.get("semrush_report", True):
+            tools.append(semrush_report)
+            tool_names.append("semrush_report")
+        
+        if tools:
+            logger.info(f"[SEMRUSH] Tools enabled: {', '.join(tool_names)}")
+        else:
+            logger.info("[SEMRUSH] All Semrush tools disabled by config")
+        
+        return tools
+        
+    except ImportError as e:
+        logger.warning(f"[SEMRUSH] Required packages not installed: {e}")
+        return []
+    except Exception as e:
+        logger.error(f"[SEMRUSH] Error initializing tools: {e}")
+        return []
+
+
+# ============================================================
+# Ahrefs Tools
+# ============================================================
+
+def get_ahrefs_tools() -> list:
+    """Get Ahrefs SEO analytics tools if API key is configured.
+    
+    Returns:
+        List of tools if Ahrefs API key is configured, empty list otherwise.
+        
+    Available tools (15 total):
+        - ahrefs_domain_rating: Domain Rating (DR) score
+        - ahrefs_url_rating: URL Rating (UR) score
+        - ahrefs_backlinks: Detailed backlinks list
+        - ahrefs_referring_domains: Referring domains list
+        - ahrefs_anchors: Anchor text analysis
+        - ahrefs_organic_keywords: Organic keyword rankings
+        - ahrefs_organic_competitors: Organic search competitors
+        - ahrefs_keyword_metrics: Keyword search metrics
+        - ahrefs_matching_terms: Matching keyword terms
+        - ahrefs_related_terms: Related keyword suggestions
+        - ahrefs_serp_overview: SERP Top 100 analysis
+        - ahrefs_top_pages: Top pages by traffic
+        - ahrefs_health_score: Site health audit score
+        - ahrefs_brand_ai_responses: GEO - Brand in AI answers
+        - ahrefs_brand_impressions: GEO - Brand AI impressions
+    """
+    config = load_config_file()
+    ahrefs_api_key = config.get("ahrefs_api_key") if config else None
+    
+    if not ahrefs_api_key:
+        ahrefs_api_key = os.environ.get("AHREFS_API_KEY")
+    
+    if not ahrefs_api_key:
+        logger.info("[AHREFS] No Ahrefs API key configured, tools disabled")
+        return []
+    
+    try:
+        import requests
+        
+        BASE_URL = "https://api.ahrefs.com/v3"
+        
+        def _ahrefs_request(endpoint: str, params: dict) -> dict:
+            """Make authenticated request to Ahrefs API."""
+            headers = {"Authorization": f"Bearer {ahrefs_api_key}"}
+            response = requests.get(f"{BASE_URL}/{endpoint}", headers=headers, params=params, timeout=30)
+            response.raise_for_status()
+            return response.json()
+        
+        # Tool 1: Domain Rating
+        def ahrefs_domain_rating(target: str, mode: str = "domain") -> dict:
+            """Get Domain Rating (DR) score - measures backlink profile strength.
+            
+            Args:
+                target: The domain to analyze
+                mode: "domain", "prefix", "exact" (default "domain")
+            
+            Returns:
+                Dictionary containing Domain Rating score
+            """
+            try:
+                data = _ahrefs_request("site-explorer/domain-rating", {"target": target, "mode": mode})
+                return {"success": True, "target": target, "domain_rating": data}
+            except Exception as e:
+                return {"success": False, "target": target, "error": str(e)}
+        
+        # Tool 2: URL Rating
+        def ahrefs_url_rating(target: str, mode: str = "exact") -> dict:
+            """Get URL Rating (UR) score - measures page backlink profile strength.
+            
+            Args:
+                target: The URL to analyze
+                mode: "domain", "prefix", "exact" (default "exact")
+            
+            Returns:
+                Dictionary containing URL Rating score
+            """
+            try:
+                data = _ahrefs_request("site-explorer/url-rating", {"target": target, "mode": mode})
+                return {"success": True, "target": target, "url_rating": data}
+            except Exception as e:
+                return {"success": False, "target": target, "error": str(e)}
+        
+        # Tool 3: Backlinks
+        def ahrefs_backlinks(target: str, mode: str = "domain", limit: int = 100) -> dict:
+            """Get detailed backlinks pointing to a target.
+            
+            Args:
+                target: The domain or URL to analyze
+                mode: "domain", "prefix", "exact" (default "domain")
+                limit: Max results (default 100)
+            
+            Returns:
+                Dictionary containing backlinks list
+            """
+            try:
+                data = _ahrefs_request("site-explorer/backlinks", {"target": target, "mode": mode, "limit": min(limit, 1000)})
+                return {"success": True, "target": target, "backlinks": data.get("backlinks", [])}
+            except Exception as e:
+                return {"success": False, "target": target, "error": str(e)}
+        
+        # Tool 4: Referring Domains
+        def ahrefs_referring_domains(target: str, mode: str = "domain", limit: int = 100) -> dict:
+            """Get list of domains linking to the target.
+            
+            Args:
+                target: The domain or URL to analyze
+                mode: "domain", "prefix", "exact" (default "domain")
+                limit: Max results (default 100)
+            
+            Returns:
+                Dictionary containing referring domains
+            """
+            try:
+                data = _ahrefs_request("site-explorer/refdomains", {"target": target, "mode": mode, "limit": min(limit, 1000)})
+                return {"success": True, "target": target, "referring_domains": data.get("refdomains", [])}
+            except Exception as e:
+                return {"success": False, "target": target, "error": str(e)}
+        
+        # Tool 5: Anchors
+        def ahrefs_anchors(target: str, mode: str = "domain", limit: int = 100) -> dict:
+            """Get anchor text analysis for backlinks.
+            
+            Args:
+                target: The domain or URL to analyze
+                mode: "domain", "prefix", "exact" (default "domain")
+                limit: Max results (default 100)
+            
+            Returns:
+                Dictionary containing anchor text data
+            """
+            try:
+                data = _ahrefs_request("site-explorer/anchors", {"target": target, "mode": mode, "limit": min(limit, 500)})
+                return {"success": True, "target": target, "anchors": data.get("anchors", [])}
+            except Exception as e:
+                return {"success": False, "target": target, "error": str(e)}
+        
+        # Tool 6: Organic Keywords
+        def ahrefs_organic_keywords(target: str, mode: str = "domain", country: str = "us", limit: int = 100) -> dict:
+            """Get organic keyword rankings for a target.
+            
+            Args:
+                target: The domain or URL to analyze
+                mode: "domain", "prefix", "exact" (default "domain")
+                country: Country code (default "us")
+                limit: Max results (default 100)
+            
+            Returns:
+                Dictionary containing organic keywords
+            """
+            try:
+                data = _ahrefs_request("site-explorer/organic-keywords", {"target": target, "mode": mode, "country": country, "limit": min(limit, 1000)})
+                return {"success": True, "target": target, "keywords": data.get("keywords", [])}
+            except Exception as e:
+                return {"success": False, "target": target, "error": str(e)}
+        
+        # Tool 7: Organic Competitors
+        def ahrefs_organic_competitors(target: str, mode: str = "domain", country: str = "us", limit: int = 20) -> dict:
+            """Get organic search competitors for a domain.
+            
+            Args:
+                target: The domain to analyze
+                mode: "domain", "prefix", "exact" (default "domain")
+                country: Country code (default "us")
+                limit: Max results (default 20)
+            
+            Returns:
+                Dictionary containing competitor domains
+            """
+            try:
+                data = _ahrefs_request("site-explorer/competitors", {"target": target, "mode": mode, "country": country, "limit": min(limit, 100)})
+                return {"success": True, "target": target, "competitors": data.get("competitors", [])}
+            except Exception as e:
+                return {"success": False, "target": target, "error": str(e)}
+        
+        # Tool 8: Keyword Metrics
+        def ahrefs_keyword_metrics(keyword: str, country: str = "us") -> dict:
+            """Get search metrics for a keyword.
+            
+            Args:
+                keyword: The keyword to analyze
+                country: Country code (default "us")
+            
+            Returns:
+                Dictionary containing keyword metrics
+            """
+            try:
+                data = _ahrefs_request("keywords-explorer/metrics", {"keyword": keyword, "country": country})
+                return {"success": True, "keyword": keyword, "metrics": data}
+            except Exception as e:
+                return {"success": False, "keyword": keyword, "error": str(e)}
+        
+        # Tool 9: Matching Terms
+        def ahrefs_matching_terms(keyword: str, country: str = "us", limit: int = 50) -> dict:
+            """Get keywords containing the seed keyword.
+            
+            Args:
+                keyword: The seed keyword
+                country: Country code (default "us")
+                limit: Max results (default 50)
+            
+            Returns:
+                Dictionary containing matching keywords
+            """
+            try:
+                data = _ahrefs_request("keywords-explorer/matching-terms", {"keyword": keyword, "country": country, "limit": min(limit, 500)})
+                return {"success": True, "keyword": keyword, "matching_terms": data.get("keywords", [])}
+            except Exception as e:
+                return {"success": False, "keyword": keyword, "error": str(e)}
+        
+        # Tool 10: Related Terms
+        def ahrefs_related_terms(keyword: str, country: str = "us", limit: int = 50) -> dict:
+            """Get related keyword suggestions.
+            
+            Args:
+                keyword: The seed keyword
+                country: Country code (default "us")
+                limit: Max results (default 50)
+            
+            Returns:
+                Dictionary containing related keywords
+            """
+            try:
+                data = _ahrefs_request("keywords-explorer/related-terms", {"keyword": keyword, "country": country, "limit": min(limit, 500)})
+                return {"success": True, "keyword": keyword, "related_terms": data.get("keywords", [])}
+            except Exception as e:
+                return {"success": False, "keyword": keyword, "error": str(e)}
+        
+        # Tool 11: SERP Overview
+        def ahrefs_serp_overview(keyword: str, country: str = "us") -> dict:
+            """Get SERP top 100 results for a keyword.
+            
+            Args:
+                keyword: The keyword to analyze
+                country: Country code (default "us")
+            
+            Returns:
+                Dictionary containing SERP results
+            """
+            try:
+                data = _ahrefs_request("serp-overview/overview", {"keyword": keyword, "country": country})
+                return {"success": True, "keyword": keyword, "serp": data.get("serp", [])}
+            except Exception as e:
+                return {"success": False, "keyword": keyword, "error": str(e)}
+        
+        # Tool 12: Top Pages
+        def ahrefs_top_pages(target: str, mode: str = "domain", country: str = "us", limit: int = 50) -> dict:
+            """Get top pages by organic traffic.
+            
+            Args:
+                target: The domain to analyze
+                mode: "domain", "prefix", "exact" (default "domain")
+                country: Country code (default "us")
+                limit: Max results (default 50)
+            
+            Returns:
+                Dictionary containing top pages
+            """
+            try:
+                data = _ahrefs_request("site-explorer/top-pages", {"target": target, "mode": mode, "country": country, "limit": min(limit, 500)})
+                return {"success": True, "target": target, "top_pages": data.get("pages", [])}
+            except Exception as e:
+                return {"success": False, "target": target, "error": str(e)}
+        
+        # Tool 13: Health Score
+        def ahrefs_health_score(target: str) -> dict:
+            """Get site health audit score.
+            
+            Args:
+                target: The domain to analyze
+            
+            Returns:
+                Dictionary containing health score and issues
+            """
+            try:
+                data = _ahrefs_request("site-audit/health-score", {"target": target})
+                return {"success": True, "target": target, "health": data}
+            except Exception as e:
+                return {"success": False, "target": target, "error": str(e)}
+        
+        # Tool 14: Brand AI Responses (GEO)
+        def ahrefs_brand_ai_responses(brand: str, limit: int = 50) -> dict:
+            """Monitor brand mentions in AI-generated answers (GEO tool).
+            
+            Args:
+                brand: The brand name to monitor
+                limit: Max results (default 50)
+            
+            Returns:
+                Dictionary containing AI response mentions
+            """
+            try:
+                data = _ahrefs_request("brand-radar/ai-responses", {"brand": brand, "limit": min(limit, 200)})
+                return {"success": True, "brand": brand, "ai_responses": data.get("responses", [])}
+            except Exception as e:
+                return {"success": False, "brand": brand, "error": str(e)}
+        
+        # Tool 15: Brand Impressions (GEO)
+        def ahrefs_brand_impressions(brand: str) -> dict:
+            """Get brand impression metrics in AI platforms (GEO tool).
+            
+            Args:
+                brand: The brand name to monitor
+            
+            Returns:
+                Dictionary containing impression metrics
+            """
+            try:
+                data = _ahrefs_request("brand-radar/impressions", {"brand": brand})
+                return {"success": True, "brand": brand, "impressions": data}
+            except Exception as e:
+                return {"success": False, "brand": brand, "error": str(e)}
+        
+        # Filter tools based on enabled_tools config
+        enabled = get_enabled_tools()
+        tools = []
+        tool_names = []
+        
+        tool_map = {
+            "ahrefs_domain_rating": ahrefs_domain_rating,
+            "ahrefs_url_rating": ahrefs_url_rating,
+            "ahrefs_backlinks": ahrefs_backlinks,
+            "ahrefs_referring_domains": ahrefs_referring_domains,
+            "ahrefs_anchors": ahrefs_anchors,
+            "ahrefs_organic_keywords": ahrefs_organic_keywords,
+            "ahrefs_organic_competitors": ahrefs_organic_competitors,
+            "ahrefs_keyword_metrics": ahrefs_keyword_metrics,
+            "ahrefs_matching_terms": ahrefs_matching_terms,
+            "ahrefs_related_terms": ahrefs_related_terms,
+            "ahrefs_serp_overview": ahrefs_serp_overview,
+            "ahrefs_top_pages": ahrefs_top_pages,
+            "ahrefs_health_score": ahrefs_health_score,
+            "ahrefs_brand_ai_responses": ahrefs_brand_ai_responses,
+            "ahrefs_brand_impressions": ahrefs_brand_impressions,
+        }
+        
+        for name, func in tool_map.items():
+            if enabled.get(name, True):
+                tools.append(func)
+                tool_names.append(name)
+        
+        if tools:
+            logger.info(f"[AHREFS] Tools enabled: {len(tool_names)} tools")
+        else:
+            logger.info("[AHREFS] All Ahrefs tools disabled by config")
+        
+        return tools
+        
+    except ImportError as e:
+        logger.warning(f"[AHREFS] Required packages not installed: {e}")
+        return []
+    except Exception as e:
+        logger.error(f"[AHREFS] Error initializing tools: {e}")
+        return []
+
+
+# ============================================================
+# Similarweb Tools
+# ============================================================
+
+def get_similarweb_tools() -> list:
+    """Get Similarweb traffic analytics tools if API key is configured.
+    
+    Returns:
+        List of tools if Similarweb API key is configured, empty list otherwise.
+        
+    Available tools (10 total):
+        - similarweb_visits: Total visits & engagement
+        - similarweb_traffic_sources: Traffic sources breakdown
+        - similarweb_search_traffic: Search traffic details
+        - similarweb_referral_traffic: Referral traffic (GEO - AI sources)
+        - similarweb_keywords: Top organic & paid keywords
+        - similarweb_similar_sites: Similar/competing websites
+        - similarweb_global_rank: Global traffic rank
+        - similarweb_category_rank: Category/industry rank
+        - similarweb_audience_interests: Audience interest categories
+        - similarweb_geography: Traffic by country
+    """
+    config = load_config_file()
+    similarweb_api_key = config.get("similarweb_api_key") if config else None
+    
+    if not similarweb_api_key:
+        similarweb_api_key = os.environ.get("SIMILARWEB_API_KEY")
+    
+    if not similarweb_api_key:
+        logger.info("[SIMILARWEB] No Similarweb API key configured, tools disabled")
+        return []
+    
+    try:
+        import requests
+        
+        BASE_URL = "https://api.similarweb.com/v1"
+        
+        def _sw_request(endpoint: str, domain: str, params: dict = None) -> dict:
+            """Make authenticated request to Similarweb API."""
+            headers = {"api-key": similarweb_api_key}
+            req_params = {"api_key": similarweb_api_key}
+            if params:
+                req_params.update(params)
+            response = requests.get(f"{BASE_URL}/website/{domain}/{endpoint}", headers=headers, params=req_params, timeout=30)
+            response.raise_for_status()
+            return response.json()
+        
+        # Tool 1: Visits
+        def similarweb_visits(domain: str, country: str = "world", granularity: str = "monthly") -> dict:
+            """Get total visits and engagement metrics.
+            
+            Args:
+                domain: The domain to analyze
+                country: Country code or "world" (default "world")
+                granularity: "daily", "weekly", or "monthly" (default "monthly")
+            
+            Returns:
+                Dictionary containing visits and engagement data
+            """
+            try:
+                data = _sw_request("total-traffic-and-engagement/visits", domain, {"country": country, "granularity": granularity})
+                return {"success": True, "domain": domain, "visits": data}
+            except Exception as e:
+                return {"success": False, "domain": domain, "error": str(e)}
+        
+        # Tool 2: Traffic Sources
+        def similarweb_traffic_sources(domain: str, country: str = "world") -> dict:
+            """Get traffic sources breakdown (direct, search, referral, social, etc).
+            
+            Args:
+                domain: The domain to analyze
+                country: Country code or "world" (default "world")
+            
+            Returns:
+                Dictionary containing traffic sources distribution
+            """
+            try:
+                data = _sw_request("traffic-sources/overview", domain, {"country": country})
+                return {"success": True, "domain": domain, "traffic_sources": data}
+            except Exception as e:
+                return {"success": False, "domain": domain, "error": str(e)}
+        
+        # Tool 3: Search Traffic
+        def similarweb_search_traffic(domain: str, country: str = "world") -> dict:
+            """Get search traffic details (organic vs paid split).
+            
+            Args:
+                domain: The domain to analyze
+                country: Country code or "world" (default "world")
+            
+            Returns:
+                Dictionary containing search traffic breakdown
+            """
+            try:
+                data = _sw_request("traffic-sources/search", domain, {"country": country})
+                return {"success": True, "domain": domain, "search_traffic": data}
+            except Exception as e:
+                return {"success": False, "domain": domain, "error": str(e)}
+        
+        # Tool 4: Referral Traffic (GEO important)
+        def similarweb_referral_traffic(domain: str, country: str = "world") -> dict:
+            """Get referral traffic sources - important for tracking AI referrals (GEO).
+            
+            Args:
+                domain: The domain to analyze
+                country: Country code or "world" (default "world")
+            
+            Returns:
+                Dictionary containing referral sites list
+            """
+            try:
+                data = _sw_request("traffic-sources/referrals", domain, {"country": country})
+                return {"success": True, "domain": domain, "referrals": data}
+            except Exception as e:
+                return {"success": False, "domain": domain, "error": str(e)}
+        
+        # Tool 5: Keywords
+        def similarweb_keywords(domain: str, country: str = "world") -> dict:
+            """Get top organic and paid keywords.
+            
+            Args:
+                domain: The domain to analyze
+                country: Country code or "world" (default "world")
+            
+            Returns:
+                Dictionary containing keywords data
+            """
+            try:
+                data = _sw_request("search-keywords/keywords", domain, {"country": country})
+                return {"success": True, "domain": domain, "keywords": data}
+            except Exception as e:
+                return {"success": False, "domain": domain, "error": str(e)}
+        
+        # Tool 6: Similar Sites
+        def similarweb_similar_sites(domain: str) -> dict:
+            """Find similar and competing websites.
+            
+            Args:
+                domain: The domain to find similar sites for
+            
+            Returns:
+                Dictionary containing similar sites list
+            """
+            try:
+                data = _sw_request("similar-sites/similarsites", domain)
+                return {"success": True, "domain": domain, "similar_sites": data.get("similar_sites", [])}
+            except Exception as e:
+                return {"success": False, "domain": domain, "error": str(e)}
+        
+        # Tool 7: Global Rank
+        def similarweb_global_rank(domain: str) -> dict:
+            """Get global traffic rank.
+            
+            Args:
+                domain: The domain to analyze
+            
+            Returns:
+                Dictionary containing global rank
+            """
+            try:
+                data = _sw_request("global-rank/global-rank", domain)
+                return {"success": True, "domain": domain, "global_rank": data}
+            except Exception as e:
+                return {"success": False, "domain": domain, "error": str(e)}
+        
+        # Tool 8: Category Rank
+        def similarweb_category_rank(domain: str) -> dict:
+            """Get category/industry rank.
+            
+            Args:
+                domain: The domain to analyze
+            
+            Returns:
+                Dictionary containing category and rank
+            """
+            try:
+                data = _sw_request("category-rank/category-rank", domain)
+                return {"success": True, "domain": domain, "category_rank": data}
+            except Exception as e:
+                return {"success": False, "domain": domain, "error": str(e)}
+        
+        # Tool 9: Audience Interests
+        def similarweb_audience_interests(domain: str) -> dict:
+            """Get audience interest categories.
+            
+            Args:
+                domain: The domain to analyze
+            
+            Returns:
+                Dictionary containing audience interests
+            """
+            try:
+                data = _sw_request("audience-interests/also-visited", domain)
+                return {"success": True, "domain": domain, "audience_interests": data}
+            except Exception as e:
+                return {"success": False, "domain": domain, "error": str(e)}
+        
+        # Tool 10: Geography
+        def similarweb_geography(domain: str) -> dict:
+            """Get traffic distribution by country.
+            
+            Args:
+                domain: The domain to analyze
+            
+            Returns:
+                Dictionary containing geographic traffic distribution
+            """
+            try:
+                data = _sw_request("geo/traffic-by-country", domain)
+                return {"success": True, "domain": domain, "geography": data}
+            except Exception as e:
+                return {"success": False, "domain": domain, "error": str(e)}
+        
+        # Filter tools based on enabled_tools config
+        enabled = get_enabled_tools()
+        tools = []
+        tool_names = []
+        
+        tool_map = {
+            "similarweb_visits": similarweb_visits,
+            "similarweb_traffic_sources": similarweb_traffic_sources,
+            "similarweb_search_traffic": similarweb_search_traffic,
+            "similarweb_referral_traffic": similarweb_referral_traffic,
+            "similarweb_keywords": similarweb_keywords,
+            "similarweb_similar_sites": similarweb_similar_sites,
+            "similarweb_global_rank": similarweb_global_rank,
+            "similarweb_category_rank": similarweb_category_rank,
+            "similarweb_audience_interests": similarweb_audience_interests,
+            "similarweb_geography": similarweb_geography,
+        }
+        
+        for name, func in tool_map.items():
+            if enabled.get(name, True):
+                tools.append(func)
+                tool_names.append(name)
+        
+        if tools:
+            logger.info(f"[SIMILARWEB] Tools enabled: {len(tool_names)} tools")
+        else:
+            logger.info("[SIMILARWEB] All Similarweb tools disabled by config")
+        
+        return tools
+        
+    except ImportError as e:
+        logger.warning(f"[SIMILARWEB] Required packages not installed: {e}")
+        return []
+    except Exception as e:
+        logger.error(f"[SIMILARWEB] Error initializing tools: {e}")
+        return []
+
+
+# ============================================================
 # Agent Initialization
 # ============================================================
 
@@ -454,9 +2129,23 @@ default_model = get_default_model()
 # Build custom subagents with model overrides
 custom_subagents = build_custom_subagents(default_model)
 
+# Get all tools
+builtin_tools = get_builtin_tools()
+serp_tools = get_serp_tools()
+exa_tools = get_exa_tools()
+tavily_tools = get_tavily_tools()
+perplexity_tools = get_perplexity_tools()
+semrush_tools = get_semrush_tools()
+ahrefs_tools = get_ahrefs_tools()
+similarweb_tools = get_similarweb_tools()
+
+# Combine all tools
+all_tools = builtin_tools + serp_tools + exa_tools + tavily_tools + perplexity_tools + semrush_tools + ahrefs_tools + similarweb_tools
+
 # Create the deep agent
 agent = create_deep_agent(
     model=default_model,
+    tools=all_tools if all_tools else None,
     system_prompt="You are a helpful AI assistant. Be concise and helpful in your responses.",
     subagents=custom_subagents if custom_subagents else None,
 )
@@ -466,4 +2155,68 @@ print("=" * 60)
 print("AGENT READY")
 print(f"  Primary Model: {default_model}")
 print(f"  Custom Subagents: {len(custom_subagents)}")
+
+# Display Built-in tools status
+if builtin_tools:
+    print(f"  Built-in Tools: {len(builtin_tools)} enabled")
+    tool_names = [t.__name__ for t in builtin_tools]
+    print(f"    - {', '.join(tool_names)}")
+
+# Display SerpAPI tools status
+if serp_tools:
+    print(f"  SerpAPI Tools: {len(serp_tools)} enabled")
+    tool_names = [t.__name__ for t in serp_tools]
+    print(f"    - {', '.join(tool_names)}")
+else:
+    print("  SerpAPI Tools: Disabled (no API key)")
+
+# Display Exa tools status
+if exa_tools:
+    print(f"  Exa Tools: {len(exa_tools)} enabled")
+    tool_names = [t.__name__ for t in exa_tools]
+    print(f"    - {', '.join(tool_names)}")
+else:
+    print("  Exa Tools: Disabled (no API key)")
+
+# Display Tavily tools status
+if tavily_tools:
+    print(f"  Tavily Tools: {len(tavily_tools)} enabled")
+    tool_names = [t.__name__ for t in tavily_tools]
+    print(f"    - {', '.join(tool_names)}")
+else:
+    print("  Tavily Tools: Disabled (no API key)")
+
+# Display Perplexity tools status
+if perplexity_tools:
+    print(f"  Perplexity Tools: {len(perplexity_tools)} enabled")
+    tool_names = [t.__name__ for t in perplexity_tools]
+    print(f"    - {', '.join(tool_names)}")
+else:
+    print("  Perplexity Tools: Disabled (no API key)")
+
+# Display Semrush tools status
+if semrush_tools:
+    print(f"  Semrush Tools: {len(semrush_tools)} enabled")
+    tool_names = [t.__name__ for t in semrush_tools]
+    print(f"    - {', '.join(tool_names)}")
+else:
+    print("  Semrush Tools: Disabled (no API key)")
+
+# Display Ahrefs tools status
+if ahrefs_tools:
+    print(f"  Ahrefs Tools: {len(ahrefs_tools)} enabled")
+    tool_names = [t.__name__ for t in ahrefs_tools]
+    print(f"    - {', '.join(tool_names)}")
+else:
+    print("  Ahrefs Tools: Disabled (no API key)")
+
+# Display Similarweb tools status
+if similarweb_tools:
+    print(f"  Similarweb Tools: {len(similarweb_tools)} enabled")
+    tool_names = [t.__name__ for t in similarweb_tools]
+    print(f"    - {', '.join(tool_names)}")
+else:
+    print("  Similarweb Tools: Disabled (no API key)")
+
+print(f"  Total Tools: {len(all_tools)}")
 print("=" * 60)
