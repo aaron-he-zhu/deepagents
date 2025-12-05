@@ -434,6 +434,53 @@ def build_custom_subagents(primary_model: BaseChatModel) -> list[dict[str, Any]]
 
 
 # ============================================================
+# Tool Enable/Disable Configuration
+# ============================================================
+
+def get_enabled_tools() -> dict:
+    """Get enabled tools configuration from model_config.json.
+    
+    Returns:
+        Dictionary with tool names as keys and boolean enabled status.
+        Default: all tools enabled.
+    """
+    default_config = {
+        "fetch_url": True,
+        # SerpAPI tools
+        "serpapi_search": True,
+        # Exa tools
+        "exa_search": True,
+        "exa_contents": True,
+        "exa_find_similar": True,
+        "exa_answer": True,
+        "exa_research": True,
+        # Tavily tools
+        "tavily_search": True,
+        "tavily_extract": True,
+        "tavily_map": True,
+        "tavily_crawl": True,
+        # Perplexity tools
+        "perplexity_search": True,
+        "perplexity_chat": True,
+    }
+    
+    try:
+        if CONFIG_FILE.exists():
+            with open(CONFIG_FILE) as f:
+                config = json.load(f)
+                enabled_tools = config.get("enabled_tools", {})
+                # Merge with defaults (missing keys default to True)
+                for key in default_config:
+                    if key not in enabled_tools:
+                        enabled_tools[key] = default_config[key]
+                return enabled_tools
+    except Exception as e:
+        logger.warning(f"[TOOLS] Error reading enabled_tools config: {e}")
+    
+    return default_config
+
+
+# ============================================================
 # SerpAPI Google Search Tools
 # ============================================================
 
@@ -1200,53 +1247,6 @@ def get_perplexity_tools() -> list:
     except Exception as e:
         logger.error(f"[PERPLEXITY] Error initializing tools: {e}")
         return []
-
-
-# ============================================================
-# Tool Enable/Disable Configuration
-# ============================================================
-
-def get_enabled_tools() -> dict:
-    """Get enabled tools configuration from model_config.json.
-    
-    Returns:
-        Dictionary with tool names as keys and boolean enabled status.
-        Default: all tools enabled.
-    """
-    default_config = {
-        "fetch_url": True,
-        # SerpAPI tools
-        "serpapi_search": True,
-        # Exa tools
-        "exa_search": True,
-        "exa_contents": True,
-        "exa_find_similar": True,
-        "exa_answer": True,
-        "exa_research": True,
-        # Tavily tools
-        "tavily_search": True,
-        "tavily_extract": True,
-        "tavily_map": True,
-        "tavily_crawl": True,
-        # Perplexity tools
-        "perplexity_search": True,
-        "perplexity_chat": True,
-    }
-    
-    try:
-        if CONFIG_FILE.exists():
-            with open(CONFIG_FILE) as f:
-                config = json.load(f)
-                enabled_tools = config.get("enabled_tools", {})
-                # Merge with defaults (missing keys default to True)
-                for key in default_config:
-                    if key not in enabled_tools:
-                        enabled_tools[key] = default_config[key]
-                return enabled_tools
-    except Exception as e:
-        logger.warning(f"[TOOLS] Error reading enabled_tools config: {e}")
-    
-    return default_config
 
 
 # ============================================================

@@ -134,11 +134,11 @@ class DynamicModelMiddleware(AgentMiddleware):
         
         # Check for component-specific override
         if component:
-            overrides = config.get("model_overrides", {})
+            overrides = config.get("model_overrides") or {}
             if "." in component:
                 # Handle nested overrides like "subagents.general-purpose"
                 parts = component.split(".", 1)
-                override_model = overrides.get(parts[0], {}).get(parts[1])
+                override_model = (overrides.get(parts[0]) or {}).get(parts[1])
             else:
                 override_model = overrides.get(component)
             
@@ -168,13 +168,13 @@ class DynamicModelMiddleware(AgentMiddleware):
         if config:
             model_name = config.get("model", "unknown")
             provider = config.get("provider", "unknown")
-            overrides = config.get("model_overrides", {})
+            overrides = config.get("model_overrides") or {}
             
             logger.info(f"[MODEL CONFIG] Primary Model call: provider={provider}, model={model_name}")
             
             # Log model overrides if present
             if overrides:
-                subagent_override = overrides.get("subagents", {}).get("general-purpose")
+                subagent_override = (overrides.get("subagents") or {}).get("general-purpose")
                 summarization_override = overrides.get("summarization")
                 suggestions_override = overrides.get("suggestions")
                 
@@ -200,13 +200,13 @@ class DynamicModelMiddleware(AgentMiddleware):
         if config:
             model_name = config.get("model", "unknown")
             provider = config.get("provider", "unknown")
-            overrides = config.get("model_overrides", {})
+            overrides = config.get("model_overrides") or {}
             
             logger.info(f"[MODEL CONFIG] Primary Model call (async): provider={provider}, model={model_name}")
             
             # Log model overrides if present
             if overrides:
-                subagent_override = overrides.get("subagents", {}).get("general-purpose")
+                subagent_override = (overrides.get("subagents") or {}).get("general-purpose")
                 summarization_override = overrides.get("summarization")
                 suggestions_override = overrides.get("suggestions")
                 
