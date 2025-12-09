@@ -10,3 +10,4 @@
   "perplexity_api_key": "YOUR_PERPLEXITY_API_KEY_HERE",
   "_comment": "Copy this file to model_config.json and fill in your API keys. Edit via Settings UI."
 }
+
